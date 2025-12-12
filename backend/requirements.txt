@@ -1,0 +1,9 @@
+fastapi==0.95.2
+uvicorn[standard]==0.22.0
+pydantic==1.10.12
+youtube-transcript-api==1.2.3
+python-dotenv==1.0.0
+requests==2.32.4
+yt-dlp
+ffmpeg-python==0.2.0
+openai==1.8.0

@@ -6,13 +6,17 @@ export async function ingestUrl(youtubeUrl) {
   return res.data;
 }
 
-export async function ingestTranscript(text) {
-  const res = await axios.post(`${BASE_URL}/ingest`, { transcript_text: text });
+export async function ingestTranscript(payload) {
+  const res = await axios.post(`${BASE_URL}/ingest`, payload);
   return res.data;
 }
 
-export async function queryDoc(doc_id, question) {
-  const res = await axios.post(`${BASE_URL}/query`, { doc_id, question });
+export async function queryDoc(doc_id, question, top_k = 3) {
+  const res = await axios.post(`${BASE_URL}/query`, {
+    doc_id,
+    question,
+    top_k,
+  });
   return res.data;
 }
 

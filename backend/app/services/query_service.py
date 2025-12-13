@@ -1,243 +1,169 @@
-# backend/app/services/query_service.py
-"""
-Query service with lazy-loading of heavy ML libs.
-
-- Does NOT import sentence-transformers / torch at module import time.
-- Loads embedding model lazily inside _get_embedding_model().
-- Falls back to a fast TF-IDF embedding (scikit-learn) if sentence-transformers is unavailable.
-- Exposes answer_query_for_doc(doc_id, youtube_url, question, top_k).
-"""
-
 import os
 import json
-import shutil
-from typing import Optional, List, Dict, Any
+import re
+import numpy as np
+from typing import List, Dict, Any
 from datetime import datetime
 
-from dotenv import load_dotenv
-load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env"))
+from sentence_transformers import SentenceTransformer
+from numpy.linalg import norm
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))  # backend/
-DATA_DIR = os.getenv("DATA_DIR", os.path.join(ROOT, "data"))
-TRANSCRIPTS_DIR = os.path.join(DATA_DIR, "transcripts")
+# ============================================================
+# Paths
+# ============================================================
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+DATA_DIR = os.path.join(ROOT, "data", "transcripts")
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", None)
-# OpenAI import only when needed
-openai = None
-if OPENAI_API_KEY:
-    try:
-        import openai as _openai
-        _openai.api_key = OPENAI_API_KEY
-        openai = _openai
-    except Exception:
-        openai = None
-
-# ---- Lazy model state ----
+# ============================================================
+# Lazy-loaded embedding model
+# ============================================================
 _EMBED_MODEL = None
-_EMBED_METHOD = None  # "sbert" or "tfidf"
-_TFIDF_VECT = None
 
-def _read_transcript_by_doc_id(doc_id: str) -> Dict[str, Any]:
-    path = os.path.join(TRANSCRIPTS_DIR, f"{doc_id}.json")
+def get_embed_model():
+    global _EMBED_MODEL
+    if _EMBED_MODEL is None:
+        _EMBED_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+    return _EMBED_MODEL
+
+# ============================================================
+# Utils
+# ============================================================
+def cosine_sim(a, b) -> float:
+    if norm(a) == 0 or norm(b) == 0:
+        return 0.0
+    return float(np.dot(a, b) / (norm(a) * norm(b)))
+
+def load_doc(doc_id: str) -> Dict[str, Any]:
+    path = os.path.join(DATA_DIR, f"{doc_id}.json")
     if not os.path.exists(path):
-        raise FileNotFoundError(f"No transcript JSON found for doc_id {doc_id}")
+        raise FileNotFoundError(f"Document not found: {doc_id}")
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
-def _normalize_transcript_field(raw_transcript: Any) -> List[Dict[str, Any]]:
-    segments = []
-    if raw_transcript is None:
-        return []
-    if isinstance(raw_transcript, str):
-        segments.append({"start": 0.0, "end": 0.0, "duration": 0.0, "text": raw_transcript})
-        return segments
-    if isinstance(raw_transcript, list):
-        for item in raw_transcript:
-            if item is None:
-                continue
-            if isinstance(item, str):
-                segments.append({"start": 0.0, "end": 0.0, "duration": 0.0, "text": item})
-            elif isinstance(item, dict):
-                text = item.get("text") or item.get("content") or item.get("segment_text") or ""
-                try:
-                    start = float(item.get("start", 0.0) or 0.0)
-                except Exception:
-                    start = 0.0
-                try:
-                    end = float(item.get("end", start + (item.get("duration") or 0.0)) or 0.0)
-                except Exception:
-                    end = start + (float(item.get("duration", 0.0) or 0.0))
-                duration = float(item.get("duration", end - start if end and start else 0.0) or (end - start if end else 0.0))
-                segments.append({"start": start, "end": end, "duration": duration, "text": text})
-            else:
-                segments.append({"start": 0.0, "end": 0.0, "duration": 0.0, "text": str(item)})
-        return segments
-    return [{"start": 0.0, "end": 0.0, "duration": 0.0, "text": str(raw_transcript)}]
+# ============================================================
+# Chunking
+# ============================================================
+def chunk_text(text: str, chunk_size=450, overlap=100) -> List[str]:
+    chunks = []
+    start = 0
+    while start < len(text):
+        chunks.append(text[start:start + chunk_size])
+        start += chunk_size - overlap
+    return chunks
 
-# ---- Embedding utilities with lazy imports and TF-IDF fallback ----
-def _get_embedding_model():
-    """
-    Lazy-load an SBERT model if available; if not, use TF-IDF fallback.
-    This function ensures imports happen only when needed.
-    """
-    global _EMBED_MODEL, _EMBED_METHOD, _TFIDF_VECT
-    if _EMBED_MODEL is not None:
-        return _EMBED_MODEL, _EMBED_METHOD
+# ============================================================
+# Sentence splitting
+# ============================================================
+def split_sentences(text: str) -> List[str]:
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    clean = []
+    for s in sentences:
+        s = s.strip()
+        if 25 <= len(s) <= 220:
+            clean.append(s)
+    return clean
 
-    # Try to load sentence-transformers (may import torch -> heavy)
-    try:
-        # Import inside try to avoid module-level import costs
-        from sentence_transformers import SentenceTransformer  # type: ignore
-        model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-        _EMBED_MODEL = model
-        _EMBED_METHOD = "sbert"
-        return _EMBED_MODEL, _EMBED_METHOD
-    except Exception as e:
-        # Sentence-transformers not available or failed -> fallback to TF-IDF
-        try:
-            # lightweight sklearn import
-            from sklearn.feature_extraction.text import TfidfVectorizer  # type: ignore
-            _TFIDF_VECT = TfidfVectorizer(max_features=768, stop_words="english")
-            _EMBED_MODEL = _TFIDF_VECT
-            _EMBED_METHOD = "tfidf"
-            return _EMBED_MODEL, _EMBED_METHOD
-        except Exception as e2:
-            # both failed -> raise explanatory error
-            raise RuntimeError(
-                "No embedding backend available. Install 'sentence-transformers' (and torch) "
-                "for semantic embeddings or 'scikit-learn' for TF-IDF fallback."
-            )
+# ============================================================
+# Question classification
+# ============================================================
+def is_definition_question(question: str) -> bool:
+    q = question.lower()
+    return any(p in q for p in [
+        "what is",
+        "what does",
+        "stand for",
+        "define",
+        "what type",
+        "what kind",
+        "how do"
+    ])
 
-def _compute_embeddings_for_texts(texts: List[str]):
-    """
-    Compute embeddings for a list of texts.
-    Uses SBERT if available else TF-IDF fallback.
-    """
-    model, method = _get_embedding_model()
-    if method == "sbert":
-        # SentenceTransformers model.encode returns numpy arrays
-        embs = model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
-        return embs
-    elif method == "tfidf":
-        # fit_transform returns sparse matrix; convert to dense
-        X = model.fit_transform(texts)
-        return X.toarray()
-    else:
-        raise RuntimeError("Unknown embedding method")
+# ============================================================
+# Clean spoken language
+# ============================================================
+def clean_sentence(sent: str) -> str:
+    sent = re.sub(r"\b(well|so|like|basically|something like)\b", "", sent, flags=re.I)
+    sent = re.sub(r"\s+", " ", sent)
+    sent = sent.strip(" ,.-")
+    return sent
 
-import numpy as np
-from numpy.linalg import norm
+# ============================================================
+# MAIN QUERY
+# ============================================================
+def answer_query_for_doc(doc_id: str, question: str, top_k: int = 3):
 
-def _cosine_sim(a: np.ndarray, b: np.ndarray):
-    na = norm(a)
-    nb = norm(b)
-    if na == 0 or nb == 0:
-        return 0.0
-    return float(np.dot(a, b) / (na * nb))
+    doc = load_doc(doc_id)
+    transcript = doc.get("transcript", [])
 
-def _rank_segments_by_similarity(segments: List[Dict[str, Any]], seg_embs: np.ndarray, query_emb: np.ndarray, top_k: int):
-    scores = []
-    for i, emb in enumerate(seg_embs):
-        score = _cosine_sim(np.asarray(emb), np.asarray(query_emb))
-        scores.append((i, score))
-    scores.sort(key=lambda x: x[1], reverse=True)
-    top = scores[:top_k]
-    results = []
-    for idx, score in top:
-        s = segments[idx]
-        results.append({"index": idx, "score": float(score), "start": s.get("start",0.0), "end": s.get("end",0.0), "text": s.get("text","")})
-    return results
+    if not transcript:
+        return {
+            "status": "empty",
+            "answer": "Transcript is empty.",
+            "sources": []
+        }
 
-# OpenAI summarization helper (only if openai configured)
-def _synthesize_answer_with_openai(question: str, top_segments: List[Dict[str, Any]]):
-    if not openai:
-        raise RuntimeError("OpenAI not configured.")
-    context = "\n\n".join([f"[{int(seg.get('start',0))}s - {int(seg.get('end',0))}s] {seg.get('text','')}" for seg in top_segments])
-    prompt = (
-        "You are a helpful assistant. Use the following transcript snippets to answer the question.\n\n"
-        f"Transcript snippets:\n{context}\n\nQuestion: {question}\n\nAnswer (concise, cite short timestamps like [12s]):"
+    full_text = " ".join(seg.get("text", "") for seg in transcript)
+
+    chunks = chunk_text(full_text)
+    model = get_embed_model()
+
+    chunk_embeddings = model.encode(chunks)
+    query_embedding = model.encode(question)
+
+    ranked_chunks = sorted(
+        [(cosine_sim(e, query_embedding), c) for e, c in zip(chunk_embeddings, chunks)],
+        reverse=True
     )
-    resp = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role":"system","content":"You are a helpful assistant."},{"role":"user","content":prompt}],
-        temperature=0.0,
-        max_tokens=500,
-        n=1,
+
+    top_chunks = [c for s, c in ranked_chunks[:top_k] if s > 0.35]
+
+    if not top_chunks:
+        return {
+            "status": "irrelevant",
+            "answer": "This question is not covered in the provided transcript.",
+            "sources": []
+        }
+
+    candidate_sentences = []
+    for chunk in top_chunks:
+        candidate_sentences.extend(split_sentences(chunk))
+
+    sent_embeddings = model.encode(candidate_sentences)
+
+    ranked_sentences = sorted(
+        [(cosine_sim(e, query_embedding), s) for e, s in zip(sent_embeddings, candidate_sentences)],
+        reverse=True
     )
-    return resp["choices"][0]["message"]["content"].strip()
 
-# ---- Public entrypoint ----
-def answer_query_for_doc(doc_id: Optional[str], youtube_url: Optional[str], question: str, top_k:int = 5) -> Dict[str, Any]:
-    # Load doc JSON
-    data = None
-    if doc_id:
-        data = _read_transcript_by_doc_id(doc_id)
+    # -------- HARD FILTER --------
+    filtered = [(s, t) for s, t in ranked_sentences if s >= 0.5]
+
+    if not filtered:
+        return {
+            "status": "irrelevant",
+            "answer": "This question is not covered in the provided transcript.",
+            "sources": []
+        }
+
+    # -------- FINAL ANSWER --------
+    if is_definition_question(question):
+        answer = clean_sentence(filtered[0][1])
     else:
-        if not youtube_url:
-            raise ValueError("youtube_url required when doc_id not provided")
-        vid = youtube_url.split("v=")[-1].split("&")[0] if "v=" in youtube_url else youtube_url.split("youtu.be/")[-1].split("?")[0]
-        found = None
-        for fname in os.listdir(TRANSCRIPTS_DIR):
-            if not fname.endswith(".json"):
-                continue
-            try:
-                with open(os.path.join(TRANSCRIPTS_DIR, fname), "r", encoding="utf-8") as fh:
-                    j = json.load(fh)
-                    if j.get("video_id") == vid:
-                        found = j
-                        break
-            except Exception:
-                continue
-        if found is None:
-            raise FileNotFoundError(f"No transcript found for video id {vid}. Ingest first or paste transcript.")
-        data = found
+        answer = " ".join(clean_sentence(t) for _, t in filtered[:2])
 
-    raw_transcript = data.get("transcript", []) if isinstance(data, dict) else []
-    segments = _normalize_transcript_field(raw_transcript)
-    if not segments:
-        raise ValueError("Transcript is empty for this document. Paste transcript or run ASR first.")
-
-    texts = [seg.get("text","")[:2000] for seg in segments]
-
-    # Compute embeddings (lazy)
-    try:
-        seg_embs = _compute_embeddings_for_texts(texts)
-    except Exception as e:
-        raise RuntimeError(f"Failed to compute embeddings: {e}")
-
-    # Embed query (use same model)
-    try:
-        model, method = _get_embedding_model()
-        if method == "sbert":
-            q_emb = model.encode([question], convert_to_numpy=True)[0]
-        elif method == "tfidf":
-            # for TF-IDF fallback we must vectorize query in same vectorizer space
-            q_emb = model.transform([question]).toarray()[0]
-        else:
-            raise RuntimeError("Unknown embedding method")
-    except Exception as e:
-        raise RuntimeError(f"Failed to embed query: {e}")
-
-    # Rank
-    top_matches = _rank_segments_by_similarity(segments, seg_embs, q_emb, top_k=top_k)
-    top_segments = [{"index": m["index"], "score": m["score"], "start": m["start"], "end": m["end"], "text": m["text"]} for m in top_matches]
-
-    # Build answer
-    final_answer = None
-    if openai:
-        try:
-            final_answer = _synthesize_answer_with_openai(question, top_segments)
-        except Exception:
-            final_answer = " ".join([seg["text"] for seg in top_segments])
-    else:
-        final_answer = " ".join([seg["text"] for seg in top_segments])
+    sources = [
+        {
+            "score": round(score, 3),
+            "preview": sent[:160] + "..."
+        }
+        for score, sent in ranked_sentences[:top_k]
+    ]
 
     return {
         "status": "ok",
-        "doc_id": data.get("doc_id"),
-        "video_id": data.get("video_id"),
+        "doc_id": doc_id,
         "question": question,
-        "generated_at": datetime.utcnow().isoformat() + "Z",
-        "answer": final_answer,
-        "top_segments": top_segments,
+        "answer": answer,
+        "sources": sources,
+        "generated_at": datetime.utcnow().isoformat() + "Z"
     }

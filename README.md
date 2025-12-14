@@ -6,7 +6,8 @@ A **production-style Retrieval-Augmented Generation (RAG) system** that enables 
 
 This project is built to understand **how modern LLM systems actually work internally** — not just how to call an API.
 
----
+
+
 
 ## 🚀 Key Highlights
 
@@ -17,7 +18,8 @@ This project is built to understand **how modern LLM systems actually work inter
 ✔ Honest fallback when information is missing
 ✔ Full-stack system (FastAPI + React)
 
----
+
+
 
 ## 🧠 Problem Statement
 
@@ -31,7 +33,8 @@ This project solves that by:
 
 This is the core idea behind **Retrieval-Augmented Generation (RAG)**.
 
----
+
+
 
 ## 🏗️ System Architecture
 
@@ -43,7 +46,7 @@ This is the core idea behind **Retrieval-Augmented Generation (RAG)**.
 6. Clean answer generation from retrieved context
 7. Source attribution for transparency
 
----
+
 
 ## 🛠️ Tech Stack
 
@@ -61,7 +64,7 @@ This is the core idea behind **Retrieval-Augmented Generation (RAG)**.
 * Clean query + answer UI
 * Source previews for explainability
 
----
+
 
 ## ✨ Features
 
@@ -94,4 +97,5 @@ Through this project, I gained hands-on understanding of:
 * Reranking with cross-encoders
 * Timestamp-based YouTube jumping
 * Evaluation metrics for retrieval quality
+
 

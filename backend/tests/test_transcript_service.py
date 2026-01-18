@@ -2,7 +2,7 @@
 # Run this with: pytest -q
 
 import os
-from app.services.transcript import extract_video_id, ingest_youtube_transcript
+from backend.app.services.transcript import extract_video_id, ingest_youtube_transcript
 
 def test_extract_video_id_from_watch_url():
     url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"

@@ -1,8 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.ingest import router as ingest_router
-from app.api import query
+from backend.app.api.ingest import router as ingest_router
+from backend.app.api import query
 
 app = FastAPI(title="YouTube RAG QA - Backend")
 

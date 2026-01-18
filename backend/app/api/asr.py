@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional
 import os
-from app.services import asr as asr_service
+from backend.app.services import asr as asr_service
 
 router = APIRouter()
 

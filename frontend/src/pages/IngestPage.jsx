@@ -12,9 +12,9 @@ export default function IngestPage() {
   const [statusRaw, setStatusRaw] = useState(null);
   const [docId, setDocId] = useState(null);
 
-  // -----------------------------
-  // Convert pasted text → segments
-  // -----------------------------
+  // ----------------------------------
+  // Convert pasted text → transcript[]
+  // ----------------------------------
   function parseTranscript(text) {
     /*
       Supported formats per line:
@@ -24,7 +24,7 @@ export default function IngestPage() {
     */
     const lines = text
       .split("\n")
-      .map(l => l.trim())
+      .map((l) => l.trim())
       .filter(Boolean);
 
     const segments = [];
@@ -38,7 +38,7 @@ export default function IngestPage() {
         segments.push({
           start: parseFloat(match[1]),
           end: parseFloat(match[3]),
-          text: match[5]
+          text: match[5],
         });
       }
     }
@@ -48,7 +48,7 @@ export default function IngestPage() {
       segments.push({
         start: 0,
         end: 0,
-        text
+        text: text,
       });
     }
 
@@ -72,9 +72,12 @@ export default function IngestPage() {
 
       const transcriptSegments = parseTranscript(rawTranscript);
 
+      // ✅ FINAL PAYLOAD — MATCHES FASTAPI SCHEMA
       const payload = {
         youtube_url: youtubeUrl || null,
-        transcript: transcriptSegments
+        transcript: transcriptSegments,
+        title: "manual upload",
+        channel: "manual",
       };
 
       const res = await ingestTranscript(payload);
@@ -99,7 +102,7 @@ export default function IngestPage() {
         <label>YouTube URL (optional)</label>
         <input
           value={youtubeUrl}
-          onChange={e => setYoutubeUrl(e.target.value)}
+          onChange={(e) => setYoutubeUrl(e.target.value)}
           placeholder="https://www.youtube.com/watch?v=..."
           style={{ width: "100%", padding: 8, marginBottom: 12 }}
         />
@@ -108,7 +111,7 @@ export default function IngestPage() {
         <textarea
           rows={12}
           value={rawTranscript}
-          onChange={e => setRawTranscript(e.target.value)}
+          onChange={(e) => setRawTranscript(e.target.value)}
           placeholder="12.3 --> 18.5 This is a sentence..."
           style={{ width: "100%", padding: 8 }}
         />
@@ -130,7 +133,7 @@ export default function IngestPage() {
               background: "#f8f8f8",
               padding: 10,
               maxHeight: 300,
-              overflow: "auto"
+              overflow: "auto",
             }}
           >
             {statusRaw}

@@ -1,7 +1,8 @@
 # Force CPU-only PyTorch (CRITICAL for Render Free tier)
 --extra-index-url https://download.pytorch.org/whl/cpu
 
-torch==2.2.2
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.9.1+cpu
 sentence-transformers==2.7.0
 
 # FastAPI stack (stable with Python 3.10)

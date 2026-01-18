@@ -1,12 +1,27 @@
+# Force CPU-only PyTorch (CRITICAL for Render Free tier)
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+torch==2.2.2
+sentence-transformers==2.7.0
+
+# FastAPI stack (stable with Python 3.10)
 fastapi==0.95.2
 uvicorn[standard]==0.22.0
 pydantic==1.10.12
-youtube-transcript-api==1.2.3
+starlette==0.27.0
+
+# Utilities
 python-dotenv==1.0.0
 requests==2.32.4
-yt-dlp
+
+# YouTube + media
+youtube-transcript-api==1.2.3
+yt-dlp==2024.12.13
 ffmpeg-python==0.2.0
+
+# ML utilities (CPU-safe)
+numpy==1.26.4
+scikit-learn==1.4.2
+
+# OpenAI SDK
 openai==1.8.0
-sentence-transformers
-numpy
-scikit-learn

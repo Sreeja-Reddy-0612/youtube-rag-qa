@@ -1,10 +1,8 @@
-$gitignore = @'
 # Python
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
-*.pyc
 env/
 venv/
 .venv/
@@ -19,9 +17,8 @@ dist/
 .vscode/
 .idea/
 
-# Node/Frontend
+# Node / Frontend
 node_modules/
-dist/
 .build/
 
 # Logs
@@ -30,8 +27,8 @@ dist/
 # Secrets
 .env
 .env.*.local
-'@
 
-Set-Content -Path .gitignore -Value $gitignore -Encoding UTF8
+# Runtime data (IMPORTANT)
 backend/data/
 data/
+.env.example
